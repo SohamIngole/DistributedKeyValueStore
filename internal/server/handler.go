@@ -30,7 +30,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		args, err := resp.ReadCommand(r)
 		if err != nil {
 			if !isConnectionClosed(err) {
-				log.Printf("read error from %s: %v", conn.RemoteAddr, err)
+				log.Printf("read error from %s: %v", conn.RemoteAddr(), err)
 			}
 			return
 		}
