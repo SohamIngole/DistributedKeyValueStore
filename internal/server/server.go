@@ -10,12 +10,13 @@ import (
 
 	"DistributedKeyValueStore/internal/store"
 	"DistributedKeyValueStore/internal/resp"
+	"DistributedKeyValueStore/internal/persistence"
 )
 
 type Server struct {
 	addr string
 	store *store.Store
-	aof persistence.AOF
+	aof *persistence.AOF
 	listener net.Listener
 	connections sync.WaitGroup
 	closed atomic.Bool
