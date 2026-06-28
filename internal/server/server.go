@@ -36,7 +36,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	// Shut down gracefully when ctx is cancelled
 	go func() {
-		<-ctx.Done()
+		<-ctx.Done() // this ctx comes from main
 		s.closed.Store(true)
 		ln.Close()
 	}()
