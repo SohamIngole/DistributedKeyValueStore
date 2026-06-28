@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// Running the fuzz test found these errors, so added an upper limit to fix them
+const maxArrayLen = 1024 * 1024 // ~1 million elements
+const maxBulkLen = 512 * 1024 * 1024 // 512MB
+
 // Parses one RESP command from r, returning a slice of string arguments.
 func ReadCommand(r *bufio.Reader) ([]string, error) {
 	b, err := r.ReadByte()
@@ -42,6 +46,9 @@ func readArray(r *bufio.Reader) ([]string, error) {
 	if count < 0 {
 		return nil, nil // null array
 	}
+	if count > maxArrayLen {
+		return nil, fmt.Errorf("resp: array count %d exceeds maximum %d", count, maxArrayLen)
+	}
 
 	args := make([]string, 0, count) // 0 Length, count capacity
 	for i := 0; i < count; i++ {
@@ -73,6 +80,9 @@ func readBulkString(r *bufio.Reader) (string, error) {
 	}
 	if n < 0 {
 		return "", nil // null bulk string
+	}
+	if n > maxBulkLen {
+		return "", fmt.Errorf("resp: bulk string length %d exceeds maximum %d", n, maxBulkLen)
 	}
 
 	// Read exactly n bytes + CRLF

@@ -77,7 +77,7 @@ func replayCommand(s *store.Store, args []string) error {
 		if len(args) < 3 {
 			return nil
 		}
-		
+
 		key, value := args[1], args[2]	
 		var ttl time.Duration
 		for i := 3; i < len(args); i++ {

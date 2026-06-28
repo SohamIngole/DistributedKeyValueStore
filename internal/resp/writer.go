@@ -17,7 +17,7 @@ func NewWriter(w io.Writer) *Writer {
 
 // WriteSimpleString writes "+OK\r\n"
 func (w *Writer) WriteSimpleString(s string) error {
-	_, err := fmt.Fprintf(w.w, "%s\r\n", s)
+	_, err := fmt.Fprintf(w.w, "+%s\r\n", s)
 	return err
 }
 
