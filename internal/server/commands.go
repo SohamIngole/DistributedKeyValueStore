@@ -62,6 +62,9 @@ func (s *Server) commandSet(w *resp.Writer, args []string) {
     if s.aof != nil {
         s.aof.Append(args)
     }
+    if s.primary != nil {
+        s.primary.Propagate(args)  // fan out to all replicas
+    }
     w.WriteSimpleString("OK")
 }
 
@@ -74,6 +77,9 @@ func (s *Server) commandDel(w *resp.Writer, args []string) {
     deleted := s.store.Delete(keys...)
     if s.aof != nil {
         s.aof.Append(args)
+    }
+    if s.primary != nil {
+        s.primary.Propagate(args)
     }
     w.WriteInteger(deleted)
 }
@@ -102,7 +108,13 @@ func (s *Server) commandExpire(w *resp.Writer, args []string) {
         w.WriteError("value is not an integer or out of range")
         return
     }
+
     ok := s.store.Expire(args[1], time.Duration(secs)*time.Second)
+
+    if s.primary != nil {
+        s.primary.Propagate(args)
+    }
+
     if ok {
         w.WriteInteger(1)
     } else {
@@ -115,6 +127,7 @@ func (s *Server) commandTTL(w *resp.Writer, args []string) {
         w.WriteError("wrong number of arguments for 'ttl' command")
         return
     }
+
     d := s.store.TTL(args[1])
     switch d {
     case -1:
@@ -140,7 +153,14 @@ func (s *Server) commandPersist(w *resp.Writer, args []string) {
         w.WriteError("wrong number of arguments for 'persist' command")
         return
     }
-    if s.store.Persist(args[1]) {
+
+    result := s.store.Persist(args[1])
+
+    if s.primary != nil {
+        s.primary.Propagate(args)
+    }
+
+    if result {
         w.WriteInteger(1)
     } else {
         w.WriteInteger(0)

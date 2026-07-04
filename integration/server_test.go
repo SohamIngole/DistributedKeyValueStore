@@ -13,6 +13,7 @@ import (
     "DistributedKeyValueStore/internal/persistence"
     "DistributedKeyValueStore/internal/server"
     "DistributedKeyValueStore/internal/store"
+    "DistributedKeyValueStore/internal/replication"
 )
 
 // spins up a real server on a random port and returns a client connection.
@@ -30,7 +31,13 @@ func startTestServer(t *testing.T) net.Conn {
 	t.Cleanup(cancel)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", findFreePort(t))
-	srv := server.New(addr, s, aof)
+
+    primary := replication.NewPrimary()
+    replAddr := fmt.Sprintf("127.0.0.1:%d", findFreePort(t))
+    go primary.ListenForReplicas(replAddr)
+
+    srv := server.New(addr, s, aof, primary)
+
 	go srv.ListenAndServe(ctx)
 
 	// wait until the server is ready (until the server has finished callin net.Listen)

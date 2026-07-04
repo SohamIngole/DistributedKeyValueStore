@@ -14,6 +14,7 @@ import (
 	"DistributedKeyValueStore/internal/persistence"
 	"DistributedKeyValueStore/internal/server"
 	"DistributedKeyValueStore/internal/store"
+	"DistributedKeyValueStore/internal/replication"
 )
 
 func main() {
@@ -21,7 +22,8 @@ func main() {
     addr       := flag.String("addr", ":6379", "TCP listen address")
     aofPath    := flag.String("aof", "appendonly.aof", "AOF file path")
     aofSync    := flag.String("aof-sync", "everysecond", "AOF sync policy: always|everysecond|never")
-    // replicaOf  := flag.String("replicaof", "", "primary address for replica mode")
+    replicaOf  := flag.String("replicaof", "", "primary address for replica mode")
+	replPort := flag.String("repl-port", ":6399", "replication listener port")
     flag.Parse()
 
 	s := store.New()
@@ -48,9 +50,17 @@ func main() {
 		log.Printf("AOF replay error: %v - continuing with partial state", err) // one bad AOF entry should not crash the entire server
 	}
 	log.Printf("store has %d keys after replay", s.Len())
-
-	srv := server.New(*addr, s, aof)
 	
+	var primary *replication.Primary
+    if *replicaOf == "" {
+        primary = replication.NewPrimary()
+        go primary.ListenForReplicas(*replPort)
+    } else {
+		go replication.StartReplica(*replicaOf, s)
+	}
+
+	srv := server.New(*addr, s, aof, primary)
+
 	// Graceful shutdown on SIGINT/SIGTERM
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
@@ -64,10 +74,13 @@ func main() {
 	if err := srv.ListenAndServe(ctx); err != nil {
 		log.Fatal(err)
 	}
+
+	if primary != nil {
+		primary.Close() // closes all replica connections, terminates handleReplica goroutines
+    }
 }
 
-// replayCommand applies a single deserialized command directly to the store.
-// No network I/O — pure in-memory mutations.
+// Applies a single deserialized command directly to the store.
 func replayCommand(s *store.Store, args []string) error {
     if len(args) == 0 {
         return nil

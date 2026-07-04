@@ -11,19 +11,21 @@ import (
 	"DistributedKeyValueStore/internal/store"
 	"DistributedKeyValueStore/internal/resp"
 	"DistributedKeyValueStore/internal/persistence"
+	"DistributedKeyValueStore/internal/replication"
 )
 
 type Server struct {
 	addr string
 	store *store.Store
 	aof *persistence.AOF
+	primary *replication.Primary
 	listener net.Listener
 	connections sync.WaitGroup
 	closed atomic.Bool
 }
 
-func New(addr string, s *store.Store, aof *persistence.AOF) *Server {
-	return &Server{addr: addr, store: s, aof: aof}
+func New(addr string, s *store.Store, aof *persistence.AOF, primary *replication.Primary) *Server {
+	return &Server{addr: addr, store: s, aof: aof, primary: primary}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
