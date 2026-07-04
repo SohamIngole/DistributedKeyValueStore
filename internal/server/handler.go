@@ -7,6 +7,9 @@ import (
 	"net"
 	"strings"
 	"time"
+	"errors"
+	"io"
+	"syscall"
 
 	"DistributedKeyValueStore/internal/resp"
 )
@@ -81,7 +84,20 @@ func (s *Server) dispatch(w *resp.Writer, args []string) {
     }
 }
 
+// internal/server/handler.go
 func isConnectionClosed(err error) bool {
-    return strings.Contains(err.Error(), "use of closed network connection") ||
-        strings.Contains(err.Error(), "EOF")
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	return false
 }

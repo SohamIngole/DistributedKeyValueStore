@@ -9,6 +9,10 @@ import (
     "sync"
     "strconv"
     "io"
+    "context"
+    "time"
+    "errors"
+    "syscall"
 
     "DistributedKeyValueStore/internal/cluster"
     "DistributedKeyValueStore/internal/resp"
@@ -18,6 +22,7 @@ type Coordinator struct {
     addr  string
     ring  *cluster.Ring
     pools sync.Map    // map[nodeAddr]*connPool
+    connections sync.WaitGroup
 }
 
 func New(addr string) *Coordinator {
@@ -31,64 +36,90 @@ func (c *Coordinator) AddNode(addr string) {
     log.Printf("coordinator: added node %s", addr)
 }
 
-func (c *Coordinator) ListenAndServe() error { // Future work -> add graceful shtutdown (using ctx), error logging, WaitGroup tracking, idle timeouts, similar to server.ListenAndServe
+func (c *Coordinator) ListenAndServe(ctx context.Context) error {
     ln, err := net.Listen("tcp", c.addr)
     if err != nil {
         return err
     }
     log.Printf("coordinator listening on %s", c.addr)
+
+    go func() {
+        <-ctx.Done()
+        ln.Close()
+    }()
+
     for {
         conn, err := ln.Accept()
         if err != nil {
+            if ctx.Err() != nil {
+                break   // intentional shutdown
+            }
+            log.Printf("coordinator: accept error: %v", err)
             continue
         }
+        c.connections.Add(1)
         go c.handleClient(conn)
     }
+
+    c.connections.Wait()
+    log.Println("coordinator shutdown complete")
+    return nil
 }
 
-func (c *Coordinator) handleClient(client net.Conn) { // Future work -> add client deadlines, WaitGroup, isConnectionClosed check
-    defer client.Close()
-    r := bufio.NewReader(client)
-    w := resp.NewWriter(client)
+func (c *Coordinator) handleClient(client net.Conn) {
+	defer func() {
+		client.Close()
+		c.connections.Done()
+	}()
 
-    for {
-        args, err := resp.ReadCommand(r)
-        if err != nil {
-            return
-        }
-        if len(args) == 0 {
-            continue
-        }
+	// Idle timeout: drop connections inactive for 5 minutes
+	client.SetDeadline(time.Now().Add(5 * time.Minute))
 
-        cmd := strings.ToUpper(args[0])
+	r := bufio.NewReader(client)
+	w := resp.NewWriter(client)
 
-        // Broadcast commands that don't have a key argument to all nodes or handle locally
-        switch cmd {
-        case "PING":
-            w.WriteSimpleString("PONG")
-            continue
-        case "DBSIZE":
-            c.handleDBSize(w)
-            continue
-        }
+	for {
+		// Reset deadline on each command
+		client.SetDeadline(time.Now().Add(5 * time.Minute))
 
-        // Route commands that need a key to the right node
-        if len(args) < 2 {
-            w.WriteError("wrong number of arguments for '" + strings.ToLower(cmd) + "' command")
-            continue
-        }
+		args, err := resp.ReadCommand(r)
+		if err != nil {
+			if !isConnectionClosed(err) {
+				log.Printf("coordinator: read error from %s: %v", client.RemoteAddr(), err)
+			}
+			return
+		}
+		if len(args) == 0 {
+			continue
+		}
 
-        key := args[1]
-        nodeAddr, ok := c.ring.GetNode(key)
-        if !ok {
-            w.WriteError("no nodes available")
-            continue
-        }
+		cmd := strings.ToUpper(args[0])
 
-        if err := c.forward(w, nodeAddr, args); err != nil {
-            w.WriteError(fmt.Sprintf("upstream error: %v", err))
-        }
-    }
+		switch cmd {
+		case "PING":
+			w.WriteSimpleString("PONG")
+			continue
+		case "DBSIZE":
+			c.handleDBSize(w)
+			continue
+		}
+
+		if len(args) < 2 {
+			w.WriteError("wrong number of arguments for '" + strings.ToLower(cmd) + "' command")
+			continue
+		}
+
+		key := args[1]
+		nodeAddr, ok := c.ring.GetNode(key)
+		if !ok {
+			w.WriteError("no nodes available")
+			continue
+		}
+
+		if err := c.forward(w, nodeAddr, args); err != nil {
+			w.WriteError(fmt.Sprintf("upstream error: %v", err))
+		}
+	}
 }
 
 
@@ -209,4 +240,21 @@ func (c *Coordinator) dbSizeFromNode(nodeAddr string) int {
     }
     n, _ := strconv.Atoi(line[1:])
     return n
+}
+
+func isConnectionClosed(err error) bool {
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	return false
 }
