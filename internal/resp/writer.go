@@ -65,3 +65,7 @@ func (w *Writer) WriteArray(items []string) error {
     }
     return nil
 }
+
+func (w *Writer) Underlying() io.Writer {
+    return w.w
+}
