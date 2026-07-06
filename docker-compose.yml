@@ -1,0 +1,47 @@
+services:
+  node1:
+    build: .
+    command: ["-addr", ":6379", "-repl-port", ":6399", "-aof", "/data/node1.aof"]
+    ports:
+      - "6379:6379"
+      - "6399:6399"
+    volumes:
+      - node1-data:/data
+
+  node2:
+    build: .
+    command: ["-addr", ":6380", "-repl-port", ":6400", "-aof", "/data/node2.aof"]
+    ports:
+      - "6380:6380"
+      - "6400:6400"
+    volumes:
+      - node2-data:/data
+
+  replica1:
+    build: .
+    command: [
+      "-addr", ":6381",
+      "-replicaof", "node1:6399",
+      "-aof", "/data/replica.aof"
+    ]
+    ports:
+      - "6381:6381"
+    depends_on:
+      - node1
+    volumes:
+      - replica-data:/data
+
+  coordinator:
+    build: .
+    entrypoint: ["/coordinator"]
+    command: ["-addr", ":7000", "-nodes", "node1:6379,node2:6380"]
+    ports:
+      - "7000:7000"
+    depends_on:
+      - node1
+      - node2
+
+volumes:
+  node1-data:
+  node2-data:
+  replica-data:
